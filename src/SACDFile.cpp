@@ -206,6 +206,7 @@ struct SACDContext
   uint8_t* frame_buffer = nullptr;
   CRingBuffer decode_buffer;
   int64_t pos = 0;
+  int area = 0;
 };
 
 static void frame_read_callback(scarletbook_handle_t* handle, uint8_t* frame_data,
@@ -241,7 +242,8 @@ static void frame_error_callback(int frame_count, int frame_error_code,
 
 }
 
-class CSACDFile : public kodi::addon::CInstanceVFS
+class ATTRIBUTE_HIDDEN CSACDFile : public kodi::addon::CInstanceVFS,
+                                   public kodi::addon::CAddonBase
 {
 public:
   CSACDFile(KODI_HANDLE instance) : CInstanceVFS(instance) { }
@@ -260,7 +262,10 @@ public:
                     CVFSCallbacks callbacks) override
   { std::string rpath; return ContainsFiles(url, items, rpath); }
 
+  ADDON_STATUS SetSetting(const std::string& settingName, const kodi::CSettingValue& settingValue) override;
+
   std::vector<uint8_t> id3_buffer;
+  bool prefer_mchan = false;
 };
 
 void* CSACDFile::Open(const VFSURL& url)
@@ -281,9 +286,14 @@ void* CSACDFile::Open(const VFSURL& url)
     delete result;
     return nullptr;
   }
+  result->area = result->handle->twoch_area_idx;
+  if (prefer_mchan || result->handle->twoch_area_idx == -1)
+    result->area = result->handle->mulch_area_idx;
+
+  std::cout << "hmm " << result->handle->mulch_area_idx << " " << result->handle->twoch_area_idx << " " << result->area << std::endl;
 
   result->output = scarletbook_output_create(result->handle, 0, 0, 0);
-  scarletbook_output_enqueue_track(result->output, result->handle->twoch_area_idx,
+  scarletbook_output_enqueue_track(result->output, result->area,
                                    track-1, const_cast<char*>(url.url),
                                    const_cast<char*>("dsf"), 1);
 
@@ -529,6 +539,18 @@ bool CSACDFile::ContainsFiles(const VFSURL& url, std::vector<kodi::vfs::CDirEntr
   return false;
 }
 
+ADDON_STATUS CSACDFile::SetSetting(const std::string& settingName,
+                                   const kodi::CSettingValue& settingValue)
+{
+  if (settingName.empty() || settingValue.empty())
+    return ADDON_STATUS_UNKNOWN;
+
+  if (settingName == "mchan")
+  {
+    prefer_mchan = settingValue.GetBoolean();
+    return ADDON_STATUS_OK;
+  }
+}
 
 class ATTRIBUTE_HIDDEN CMyAddon : public kodi::addon::CAddonBase
 {
